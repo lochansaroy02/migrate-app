@@ -18,4 +18,6 @@ cp .env.example .env      # fill in your credentials
 docker compose up --build
 ```
 
+Frontend → http://localhost:3000
 API docs → http://localhost:8000/docs
+Flower → http://localhost:5555
