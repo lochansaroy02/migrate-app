@@ -46,6 +46,7 @@ class ColumnSchema(BaseModel):
     max_length: int | None = None
     precision: int | None = None
     scale: int | None = None
+    enum_values: list[str] | None = None  # populated for PostgreSQL enum columns
 
 
 class TableSchema(BaseModel):

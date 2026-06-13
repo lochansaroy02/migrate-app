@@ -132,16 +132,29 @@ class PostgresProvider(BaseDatabaseProvider):
             table_name,
         )
 
+        # Fetch enum types so we can recreate them in the destination
+        enum_rows = await self._pool.fetch(
+            """
+            SELECT t.typname, array_agg(e.enumlabel ORDER BY e.enumsortorder) AS labels
+            FROM pg_type t
+            JOIN pg_enum e ON e.enumtypid = t.oid
+            JOIN pg_namespace n ON n.oid = t.typnamespace AND n.nspname = 'public'
+            GROUP BY t.typname
+            """,
+        )
+        enum_map: dict[str, list[str]] = {r["typname"]: list(r["labels"]) for r in enum_rows}
+
         columns = [
             ColumnSchema(
                 name=r["column_name"],
-                data_type=_PG_TYPE_MAP.get(r["data_type"], r["data_type"].upper()),
+                data_type=_PG_TYPE_MAP.get(r["data_type"], r["data_type"]),
                 is_nullable=r["is_nullable"] == "YES",
                 is_primary_key=bool(r["is_pk"]),
                 default=r["column_default"],
                 max_length=r["character_maximum_length"],
                 precision=r["numeric_precision"],
                 scale=r["numeric_scale"],
+                enum_values=enum_map.get(r["data_type"]),
             )
             for r in col_rows
         ]
@@ -207,13 +220,28 @@ class PostgresProvider(BaseDatabaseProvider):
 
     async def create_table(self, schema: TableSchema) -> None:
         assert self._pool, "Not connected"
+
+        # Create any custom enum types that don't yet exist in the destination
+        for col in schema.columns:
+            if col.enum_values is not None:
+                labels = ", ".join(f"'{v}'" for v in col.enum_values)
+                await self._pool.execute(
+                    f"DO $$ BEGIN "
+                    f"  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = '{col.data_type}') THEN "
+                    f"    CREATE TYPE {col.data_type} AS ENUM ({labels}); "
+                    f"  END IF; "
+                    f"END $$"
+                )
+
         col_defs = []
         for col in schema.columns:
             dtype = col.data_type
-            if col.max_length:
-                dtype = f"{dtype}({col.max_length})"
-            elif col.precision and col.scale:
-                dtype = f"{dtype}({col.precision},{col.scale})"
+            if col.enum_values is None:
+                # Only apply size modifiers for non-enum types
+                if col.max_length:
+                    dtype = f"{dtype}({col.max_length})"
+                elif col.precision and col.scale:
+                    dtype = f"{dtype}({col.precision},{col.scale})"
             null_clause = "" if col.is_nullable else " NOT NULL"
             col_defs.append(f'"{col.name}" {dtype}{null_clause}')
 
