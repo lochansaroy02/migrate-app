@@ -1,0 +1,16 @@
+services:
+  # Next.js 16 frontend (Node web service on the free plan).
+  - type: web
+    name: databridge-frontend
+    runtime: node
+    plan: free
+    rootDir: frontend          # monorepo: build/run from the frontend subdir
+    buildCommand: npm ci && npm run build
+    startCommand: npx next start -p $PORT   # Render injects $PORT; Next must bind it
+    envVars:
+      # NEXT_PUBLIC_* vars are inlined into the client bundle at BUILD time,
+      # so this must be present when `npm run build` runs.
+      - key: NEXT_PUBLIC_API_URL
+        value: https://databridge-gmbp.onrender.com
+      - key: NODE_VERSION
+        value: "22"
